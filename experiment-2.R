@@ -1,7 +1,7 @@
 ########################################################################################################################
 #
-# Description: This R script compares tp, tpidf, and the hypergeometric test on NYSK documents in the one-term query
-#  document retrieval scenario
+# Description: This R script compares tp, tpidf, and the hypergeometric test on NYSK documents in the document
+#  summarization scenario.
 #
 # Variables of note:
 #  term[i] = i'th term in vocabulary
@@ -25,12 +25,12 @@
 rm(list = ls()) # deletes any already initialized variables in R session
 library(ggplot2)
 library(magicaxis)
+library(rjson)
 working_dir <- getwd()
 input_dir <- paste0(working_dir, "/stats/")
-stats_output_dir <- paste0(working_dir, "/experiment-2-stats/")
 plots_output_dir <- paste0(working_dir, "/plots/")
 setwd(working_dir)
-set.seed(24329) # initialize random seed
+set.seed(63429) # initialize random seed
 
 
 ## set plot colours 
@@ -45,151 +45,100 @@ tred <- cols[2]; tgreen <- tcols[3]; tblue <- tcols[4]
 
 
 ## load some NYSK data summary statistics
-load(paste0(input_dir, "T-uppercase.Rdata"))
 load(paste0(input_dir, "N_bar-uppercase.Rdata"))
 load(paste0(input_dir, "K_bar-uppercase.Rdata"))
 load(paste0(input_dir, "n_bar-lowercase.Rdata"))
 load(paste0(input_dir, "doc.Rdata"))
-load(paste0(input_dir, "term_to_doc_ids_lst.Rdata"))
-load(paste0(input_dir, "term.Rdata"))
+load(paste0(input_dir, "tp_score_lst.Rdata"))
+load(paste0(input_dir, "tpidf_score_lst.Rdata"))
+load(paste0(input_dir, "hgt_score_lst.Rdata"))
 
 
-## calculate P@10 scores for each individual terms in the collection
-p10_mat <-  mat.or.vec(nr = T, nc = 4)
+## find over-represented terms in documents overlap
+top <- 10
+M <- max(K_bar)
+p10_mat <- mat.or.vec(nr = N_bar, nc = 4)
 colnames(p10_mat) <- c("HGT-RND", "HGT-TP", "HGT-TPIDF", "TP-TPIDF")
 
-# tp and tp-tpidf
-load(paste0(input_dir, "tp_score_mat.Rdata"))
-load(paste0(input_dir, "tpidf_score_mat.Rdata"))
+for (j in 1 : N_bar) {
+  myterms <- doc[[j]]
+  tp_ranked_terms <- myterms[sort(rank(-tp_score_lst[[j]], ties.method = "random"), index.return = TRUE)$ix]
+  tpidf_ranked_terms <- myterms[sort(rank(-tpidf_score_lst[[j]], ties.method = "random"), index.return = TRUE)$ix]
+  hgt_ranked_terms <- myterms[sort(rank(-hgt_score_lst[[j]], ties.method = "random"), index.return = TRUE)$ix]
 
-for (i in 1 : T) {
-  doc_ids <- term_to_doc_ids_lst[[i]]
-  tp_ranked_docs <- sort(rank(-tp_score_mat[i, doc_ids], ties.method = "random"), index.return = TRUE)$ix
-  tpidf_ranked_docs <- sort(rank(-tpidf_score_mat[i, doc_ids], ties.method = "random"), index.return = TRUE)$ix
-  
-  if (K_bar[i] <= top) {
-    p10_mat[i, "TP-TPIDF"] <- top 
+  if(n_bar[j] <= top) {
+    p10_mat[j, "HGT-RND"] <- top
   } else {
-    p10_mat[i, "TP-TPIDF"] <- length(intersect(tp_ranked_docs[1 : top], tpidf_ranked_docs[1 : top]))
+    p10_mat[j, "HGT-RND"] <- top * top / n_bar[j]
   }
+
+  p10_mat[j, "HGT-TP"] <- length(intersect(hgt_ranked_terms[1 : top], tp_ranked_terms[1 : top]))
+  p10_mat[j, "HGT-TPIDF"] <- length(intersect(hgt_ranked_terms[1 : top], tpidf_ranked_terms[1 : top]))
+  p10_mat[j, "TP-TPIDF"] <- length(intersect(tp_ranked_terms[1 : top], tpidf_ranked_terms[1 : top]))
 }
-
-rm(tpidf_score_mat)
-
-# tp and hgt
-load(paste0(input_dir, "hgt_score_mat.Rdata"))
-
-for (i in 1 : T) {
-  doc_ids <- term_to_doc_ids_lst[[i]]
-  tp_ranked_docs <- sort(rank(-tp_score_mat[i, doc_ids], ties.method = "random"), index.return = TRUE)$ix
-  hgt_ranked_docs <- sort(rank(-hgt_score_mat[i, doc_ids], ties.method = "random"), index.return = TRUE)$ix
-  
-  if (K_bar[i] <= top) {
-    p10_mat[i, "HGT-TP"] <- top 
-  } else {
-    p10_mat[i, "HGT-TP"] <- length(intersect(tp_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
-  }
-}
-
-rm(tp_score_mat)
-
-# tpidf and hgt
-load(paste0(input_dir, "tpidf_score_mat.Rdata"))
-
-for (i in 1 : T) {
-  doc_ids <- term_to_doc_ids_lst[[i]]
-  tpidf_ranked_docs <- sort(rank(-tpidf_score_mat[i, doc_ids], ties.method = "random"), index.return = TRUE)$ix
-  hgt_ranked_docs <- sort(rank(-hgt_score_mat[i, doc_ids], ties.method = "random"), index.return = TRUE)$ix
-  
-  if (K_bar[i] <= top) {
-    p10_mat[i, "HGT-TPIDF"] <- top 
-  } else {
-    p10_mat[i, "HGT-TPIDF"] <- length(intersect(tfidf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
-  }
-}
-
-rm(tpidf_score_mat)
-
-# hgt and random
-for (i in 1 : T) {
-  doc_ids <- term_to_doc_ids_lst[[i]]
-  hgt_ranked_docs <- sort(rank(-hgt_score_mat[i, doc_ids], ties.method = "random"), index.return = TRUE)$ix
-  
-  if (K_bar[i] <= top) {
-    p10_mat[i, "HGT-RND"] <- top 
-  } else {
-    p10_mat[i, "HGT-RND"] <- top * top / K_bar[i]
-  }
-}
-
-rm(hgt_score_mat)
 
 apply(p10_mat, 2, mean)
 # > apply(p10_mat, 2, mean)
 #   HGT-RND    HGT-TP HGT-TPIDF  TP-TPIDF 
-#  8.684827  9.509527  9.509283  9.984217 
+# 0.5837463 4.1779100 8.4683812 3.1569907
 
-save(p10_mat, file = paste0(stats_output_dir, "p10_mat.Rdata"))
+apply(p10_mat, 2, sd)
+# > apply(p10_mat, 2, sd)
+#   HGT-RND    HGT-TP HGT-TPIDF  TP-TPIDF 
+# 0.7120265 1.6838443 1.0380862 1.6763330
 
 
-## P@10 scores by cutoff C
-M <- max(K_bar)
-p10_mat_at_C <-  mat.or.vec(nr = M, nc = 4)
-colnames(p10_mat_at_C) <- c("HGT-RND", "HGT-TP", "HGT-TPIDF", "TP-TPIDF")
+## generate overlapping histogram plot
+myhist <- hist(
+  p10_mat[,"HGT-RND"],
+  breaks = seq(from = 0, to = top, by = 1),
+  plot = FALSE)
+counts1 <- myhist$counts
 
-for (C in 1 : M) {
-  indices <- which(K_bar >= C)
-  p10_mat_at_C[C, "HGT-RND"] <- mean(p10_mat[indices, "HGT-RND"])
-  p10_mat_at_C[C, "HGT-TP"] <- mean(p10_mat[indices, "HGT-TP"])
-  p10_mat_at_C[C, "HGT-TPIDF"] <- mean(p10_mat[indices, "HGT-TPIDF"])
-  p10_mat_at_C[C, "TP-TPIDF"] <- mean(p10_mat[indices, "TP-TPIDF"])
-}
+myhist <- hist(
+  p10_mat[,"HGT-TPIDF"],
+  breaks = seq(from = 0, to = top, by = 1),
+  plot = FALSE)
+counts2 <- myhist$counts
 
-save(p10_mat_at_C, file = paste0(stats_output_dir, "p10_mat_at_C.Rdata"))
+myhist <- hist(
+  p10_mat[,"HGT-TP"],
+  breaks = seq(from = 0, to = top, by = 1),
+  plot = FALSE)
+counts3 <- myhist$counts
 
-## generate cutoff plot
-x <- 1 : M
-y1 <- p10_mat_at_C[, "TP-TPIDF"]
-y2 <- p10_mat_at_C[, "HGT-TPIDF"]
-y3 <- p10_mat_at_C[, "HGT-RND"]
+y1 <- 0
+y2 <- max(c(counts1, counts2, counts3))
 
 pdf(paste0(plots_output_dir, "figure-1b.pdf"), width = 6, height = 6)
-plot(x = x,
-  y = y1,
-  xlab = "Cutoff Value, C",
-  ylab = "Average P@10 Score",
-  main = "Document Retrieval Scenario",
-  ylim = c(0, 10),
-  type = "n",
+plot(
+  x = counts1,
+  main = "Document Summarization Scenario",
+  xlab = "P@10 Score",
+  ylab = "Number of Documents",
   log = "x",
-  axes = FALSE)
-grid(lwd = 2)
+  axes = FALSE,
+  type = "n")
 magaxis()
-points(x = x,
-  y = y1,
-  type = "l",
-  lty = "dashed",
-  lwd = 2,
-  col = gray25)
-points(x = x,
-  y = y2,
-  type = "l",
-  lwd = 2,
-  col = gray25)
-points(x = x,
-  y = y3,
-  type = "l",
-  lty = "dotted",
-  lwd = 3,
-  col = gray25)
+
+for (i in 1 : top) {
+  rect(xleft = i - 1 + 0.5, ybottom = 0, xright = i + 0.5, ytop = counts1[i], col = tred)
+}
+
+for (i in 1 : top) {
+  rect(xleft = i - 1 + 0.5, ybottom = 0, xright = i + 0.5, ytop = counts2[i], col = tblue)
+}
+
+for (i in 1 : top) {
+  rect(xleft = i - 1 + 0.5, ybottom = 0, xright = i + 0.5, ytop = counts3[i], col = tgreen)
+}
+
 legend( 
   "topright", 
-  c("TP / TPIDF", "Hypergeometric Test / TPIDF", "Hypergeometric Test / Random"), 
-  col = c(gray25, gray25), 
-  lty = c("dashed", "solid", "dotted"), 
-  lwd = c(2, 2, 3), 
+  c("Hypergeometric Test / Random", "Hypergeometric Test / TP", "Hypergeometric Test / TPIDF"), 
+  fill = c(tred, tgreen, tblue),
   cex = 0.9,
-  inset = 0.08,
+  inset = 0.03,
   box.lwd = 0,
   box.col = "grey90",
   bg = "grey90", 

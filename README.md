@@ -1,5 +1,5 @@
 # A Hypergeometric Test Interpretation of a Common tf-idf Variant
-This repository contains computer code for reproducing the restuls described in the manuscript “A hypergeometric test interpretation of a common tf-idf variant.” 
+This repository contains computer code for reproducing the results described in the manuscript “A hypergeometric test interpretation of a common tf-idf variant.” 
 
 ## Initial Setup
 

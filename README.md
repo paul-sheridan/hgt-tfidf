@@ -23,4 +23,4 @@ This repository contains computer code for reproducing the results described in 
 
 ## Reproducing our Twenty Newsgroups Dataset Case Study Results
 
-* To reproduce the preformance evaluation results of Table 3, run the `hgt-tfidf/cranfield/dataset/cran-preprocessing.ipynb` Jypyter Notebook file.
+* To reproduce the preformance evaluation results of Table 3, run the `hgt-tfidf/twenty-newsgroups/dataset/twenty-newsgroups-analysis.ipynb` Jypyter Notebook file.

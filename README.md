@@ -11,7 +11,7 @@ git clone https://github.com/paul-sheridan/hgt-tfidf.git
 
 ## Reproducing our NYSK Dataset Case Study Results
 
-* Download the file `nysk.xml` from the UCI Machine Learning Repository at https://archive.ics.uci.edu/ml/datasets/NYSK and place it inside the `hgt-tfidf/nysk/dataset` folder.
+* Download the file `nysk.xml` from the UCI Machine Learning Repository ([download page](https://archive.ics.uci.edu/ml/datasets/NYSK)) and place it inside the `hgt-tfidf/nysk/dataset` folder.
 * To prepare the NYSK data for analysis, open the `hgt-tfidf/nysk/dataset/nysk-preprocessing.ipynb` file as a Jypyter Notebook and run it. This script will save a preprocessed version of the NYSK data in JSON format to the file `nysk-processed.json`.
 * Create the folders `hgt-tfidf/nysk/stats` and `hgt-tfidf/nysk/plots`.
 * Run the `hgt-tfidf/nysk/nysk-generate-stats.Rmd` R Markdown file to calculate some basic statistics that will be used in the experiments.

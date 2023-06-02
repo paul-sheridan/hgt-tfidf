@@ -22,7 +22,7 @@ git clone https://github.com/paul-sheridan/hgt-tfidf.git
 ## Reproducing our Cranfield 1400 Test Collection Case Study Results
 
 * Download the files `cran.all.1400.xml`, `cran.qry.xml`, and `cranqrel.trec.txt` from the [cranfield-trec-dataset](https://github.com/oussbenk/cranfield-trec-dataset) GitHub repo and place them inside the `hgt-tfidf/cranfield/dataset` folder. We used the files associated with commit Id `1208e6edfb6cb2527b2c44398d3d8fefd3249144` in our experiments.
-* To prepare the Cranfield data for analysis, open the `hgt-tfidf/cranfield/dataset/cran-preprocessing.ipynb` file as a Jypyter Notebook and run it. This script will save a preprocessed version of the Cranfield documents in JSON format to the file `cran-docs-preprocessed.json`, and a preprocessed version of the Cranfield documents in JSON format to the file `cran-queries-preprocessed.json`.
+* To prepare the Cranfield data for analysis, open the `hgt-tfidf/cranfield/dataset/cran-preprocessing.ipynb` file as a Jypyter Notebook and run it. This script will save a preprocessed version of the documents in JSON format to the file `cran-docs-preprocessed.json`, and a preprocessed version of the queries in JSON format to the file `cran-queries-preprocessed.json`.
 * To reproduce the preformance evaluation results of Table 2, run the `hgt-tfidf/cranfield/cranfield-experiments.Rmd` R Markdown file.
 
 ## Reproducing our Twenty Newsgroups Dataset Case Study Results

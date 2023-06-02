@@ -3,7 +3,11 @@ This repository contains computer code for reproducing the results described in 
 
 ## Initial Setup
 
-* Clone this repository by running the command `git clone https://github.com/paul-sheridan/hgt-tfidf.git`.
+Clone this repository by running the command
+
+```
+git clone https://github.com/paul-sheridan/hgt-tfidf.git
+```
 
 ## Reproducing our NYSK Dataset Case Study Results
 

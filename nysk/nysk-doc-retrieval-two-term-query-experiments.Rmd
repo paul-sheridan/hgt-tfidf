@@ -1,0 +1,527 @@
+---
+title: "Compare TF, TF-IDF, and HGT in the Two-term Query Document Retrieval Scenarioo"
+author: "Paul Sheridan"
+output: html_notebook
+---
+
+## Notation
+
+Variables of note:
+
+  * term[i] = i'th term in vocabulary
+  * doc[[j]] = j'th doc in collection (unique terms)
+  * N_bar = number of documents in the collection
+  * T = number of unique terms in the collection
+  * N = total number of terms in the collection (including multiplicities) 
+  * n_bar[j] = number of unique terms in doc[[j]]
+  * n[j] = number of terms in doc[[j]] (including multiplicities)
+  * K_bar[i] = number of docs in which term[i] occurs at least once
+  * K[i] = number of occurrences of term[i] in the collection
+  * k[[j]][i] = number of occurrences of term[i] in doc[[j]]
+  * X_score_lst[[j]][i] = (tf/tfidf/hyper geometric test) score of term[i] in doc[[j]]
+  * X_score_smat[i][j] = (tf/tfidf/hyper geometric test) score of term[i] in doc[[j]]
+
+
+## Preliminaries
+ 
+```{r}
+# Delete all variables initialized in R session, if any
+rm(list = ls())
+
+# Load libraries
+library(ggplot2)
+library(magicaxis)
+library(rjson)
+library(poweRlaw)
+library(here)
+library(Matrix)
+
+# Set directory relative paths
+data_dir <- "stats"
+plots_dir <- "plots"
+
+# Set plot colors 
+gg_color_hue = function(n, alpha = 1) {
+  hues <- seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100, alpha = alpha)[1 : n]
+}
+cols <- c("grey25", gg_color_hue(n = 3))
+tcols <- c("grey25", gg_color_hue(n = 3, alpha = 0.5))
+gray25 <- cols[1]; red <- cols[2]; green <- cols[3]; blue <- cols[4]
+tred <- cols[2]; tgreen <- tcols[3]; tblue <- tcols[4]
+```
+
+
+## Two-term Query Experiments
+
+```{r}
+# Load some NYSK data summary statistics
+load(here(data_dir, "N-uppercase.Rdata"))
+load(here(data_dir, "T-uppercase.Rdata"))
+load(here(data_dir, "N_bar-uppercase.Rdata"))
+load(here(data_dir, "N_bar-uppercase.Rdata"))
+load(here(data_dir, "K_bar-uppercase.Rdata"))
+load(here(data_dir, "K-uppercase.Rdata"))
+load(here(data_dir, "n_bar-lowercase.Rdata"))
+load(here(data_dir, "n-lowercase.Rdata"))
+load(here(data_dir, "doc.Rdata"))
+load(here(data_dir, "term_to_doc_ids_lst.Rdata"))
+load(here(data_dir, "term_burstiness_score.Rdata"))
+tf_score_smat <- readMM(here(data_dir, "tf_score_smat.mtx"))
+tfidf_score_smat <- readMM(here(data_dir, "tfidf_score_smat.mtx"))
+hgt_score_smat <- readMM(here(data_dir, "hgt_score_smat.mtx"))
+```
+
+
+```{r}
+# Set random seed
+set.seed(901295)
+```
+
+
+```{r}
+# Calculate top 106 most bursty terms and load term scores
+top <- 10
+cut <- 106
+no_of_queries <- cut - top
+top_bursty_score <- sort(term_burstiness_score[which(K_bar >= 10)], decreasing = TRUE)[1 : cut]
+top_bursty_term <- names(top_bursty_score)
+load(here(data_dir, "tf_score_mat.Rdata"))
+tf_score_submat <- tf_score_mat[top_bursty_term, ]
+rm(tf_score_mat)
+load(here(data_dir, "tfidf_score_mat.Rdata"))
+tfidf_score_submat <- tfidf_score_mat[top_bursty_term, ]
+rm(tfidf_score_mat)
+load(here(data_dir, "hgt_score_mat.Rdata"))
+hgt_score_submat <- hgt_score_mat[top_bursty_term, ]
+rm(hgt_score_mat)
+```
+
+
+```{r}
+# Retrieve the three bursty terms with maximum K_bar values
+top_six_bursty_terms <- names(sort(K_bar[top_bursty_term], decreasing = TRUE))[1 : 6]
+top_six_bursty_terms
+```
+
+
+```{r}
+# Empty rows ids
+empty_row_id <- numeric(length(top_six_bursty_terms))
+for (i in 1 : length(top_six_bursty_terms)) {
+  empty_row_id[i] <- which(top_bursty_term == top_six_bursty_terms[i])
+}
+```
+
+
+```{r}
+# Calculate P@10 scores for all queries q = ("strausskahn", t)
+p10_mat <-  mat.or.vec(nr = cut, nc = 4)
+colnames(p10_mat) <- c("HGT-RND", "HGT-TF", "HGT-TFIDF", "TF-TFIDF")
+t1 <- "strausskahn"
+
+for (i in 1 : cut) {
+  t2 <- top_bursty_term[i]
+
+  if(t2 %in% top_six_bursty_terms == FALSE) {
+    query <- c(t1, t2)
+    tf_ranked_docs <- sort(rank(-apply(tf_score_submat[query,], 2, sum)), index.return = TRUE)$ix
+    tfidf_ranked_docs <- sort(rank(-apply(tfidf_score_submat[query,], 2, sum)), index.return = TRUE)$ix
+    hgt_ranked_docs <- sort(rank(-apply(hgt_score_submat[query,], 2, sum)), index.return = TRUE)$ix
+    p10_mat[i, "HGT-RND"] <- top * top / length(union(term_to_doc_ids_lst[[t1]], term_to_doc_ids_lst[[t2]]))
+    p10_mat[i, "HGT-TF"] <- length(intersect(tf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+    p10_mat[i, "HGT-TFIDF"] <- length(intersect(tfidf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+    p10_mat[i, "TF-TFIDF"] <- length(intersect(tf_ranked_docs[1 : top], tfidf_ranked_docs[1 : top]))
+  }
+}
+
+# Summary stats
+round(apply(p10_mat[-empty_row_id, ], 2, mean), digits = 2)
+round(apply(p10_mat[-empty_row_id, ], 2, sd), digits = 2)
+```
+
+
+```{r}
+# Calculate P@10 scores for all queries q = ("strausskahn", t)
+# Use cosine similarity
+query_pair_terms <- setdiff(top_bursty_term, top_six_bursty_terms)
+number_of_queries <- length(query_pair_terms)
+p10_mat <-  mat.or.vec(nr = number_or_queries, nc = 4)
+colnames(p10_mat) <- c("HGT-RND", "HGT-TF", "HGT-TFIDF", "TF-TFIDF")
+t1 <- "strausskahn"
+
+for (i in 1 : number_of_queries) {
+  # Initialize query vector
+  t2 <- query_pair_terms[i]
+  query <- c(t1, t2)
+
+  # TF
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- 1
+  query_scores[t2] <- 1
+  tf_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- tf_score_submat[, j]
+    tf_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  tf_ranked_docs <- sort(rank(-tf_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # TF-IDF
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- as.numeric(1 * log(N_bar / K_bar[t1]))
+  query_scores[t2] <- as.numeric(1 * log(N_bar / K_bar[t2]))
+  tfidf_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- tfidf_score_submat[, j]
+    tfidf_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  tfidf_ranked_docs <- sort(rank(-tfidf_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # HGT
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- - phyper(0, as.numeric(K[t1]), N - as.numeric(K[t1]), n[j], lower.tail = FALSE, log.p = TRUE)
+  query_scores[t2] <- - phyper(0, as.numeric(K[t2]), N - as.numeric(K[t2]), n[j], lower.tail = FALSE, log.p = TRUE)
+  hgt_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- hgt_score_submat[, j]
+    hgt_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  hgt_ranked_docs <- sort(rank(-hgt_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # Summary
+  p10_mat[i, "HGT-RND"] <- top * top / length(union(term_to_doc_ids_lst[[t1]], term_to_doc_ids_lst[[t2]]))
+  p10_mat[i, "HGT-TF"] <- length(intersect(tf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+  p10_mat[i, "HGT-TFIDF"] <- length(intersect(tfidf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+  p10_mat[i, "TF-TFIDF"] <- length(intersect(tf_ranked_docs[1 : top], tfidf_ranked_docs[1 : top]))
+  
+}
+
+# Summary stats
+round(apply(p10_mat, 2, mean), digits = 2)
+round(apply(p10_mat, 2, sd), digits = 2)
+```
+
+
+```{r}
+# Calculate P@10 scores for all queries q = ("say", t)
+# Use cosine similarity
+query_pair_terms <- setdiff(top_bursty_term, top_six_bursty_terms)
+number_of_queries <- length(query_pair_terms)
+p10_mat <-  mat.or.vec(nr = number_or_queries, nc = 4)
+colnames(p10_mat) <- c("HGT-RND", "HGT-TF", "HGT-TFIDF", "TF-TFIDF")
+t1 <- "say"
+
+for (i in 1 : number_of_queries) {
+  # Initialize query vector
+  t2 <- query_pair_terms[i]
+  query <- c(t1, t2)
+
+  # TF
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- 1
+  query_scores[t2] <- 1
+  tf_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- tf_score_submat[, j]
+    tf_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  tf_ranked_docs <- sort(rank(-tf_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # TF-IDF
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- as.numeric(1 * log(N_bar / K_bar[t1]))
+  query_scores[t2] <- as.numeric(1 * log(N_bar / K_bar[t2]))
+  tfidf_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- tfidf_score_submat[, j]
+    tfidf_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  tfidf_ranked_docs <- sort(rank(-tfidf_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # HGT
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- - phyper(0, as.numeric(K[t1]), N - as.numeric(K[t1]), n[j], lower.tail = FALSE, log.p = TRUE)
+  query_scores[t2] <- - phyper(0, as.numeric(K[t2]), N - as.numeric(K[t2]), n[j], lower.tail = FALSE, log.p = TRUE)
+  hgt_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- hgt_score_submat[, j]
+    hgt_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  hgt_ranked_docs <- sort(rank(-hgt_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # Summary
+  p10_mat[i, "HGT-RND"] <- top * top / length(union(term_to_doc_ids_lst[[t1]], term_to_doc_ids_lst[[t2]]))
+  p10_mat[i, "HGT-TF"] <- length(intersect(tf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+  p10_mat[i, "HGT-TFIDF"] <- length(intersect(tfidf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+  p10_mat[i, "TF-TFIDF"] <- length(intersect(tf_ranked_docs[1 : top], tfidf_ranked_docs[1 : top]))
+  
+}
+
+# Summary stats
+round(apply(p10_mat, 2, mean), digits = 2)
+round(apply(p10_mat, 2, sd), digits = 2)
+```
+
+
+```{r}
+# Calculate P@10 scores for all queries q = ("new", t)
+# Use cosine similarity
+query_pair_terms <- setdiff(top_bursty_term, top_six_bursty_terms)
+number_of_queries <- length(query_pair_terms)
+p10_mat <-  mat.or.vec(nr = number_or_queries, nc = 4)
+colnames(p10_mat) <- c("HGT-RND", "HGT-TF", "HGT-TFIDF", "TF-TFIDF")
+t1 <- "new"
+
+for (i in 1 : number_of_queries) {
+  # Initialize query vector
+  t2 <- query_pair_terms[i]
+  query <- c(t1, t2)
+
+  # TF
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- 1
+  query_scores[t2] <- 1
+  tf_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- tf_score_submat[, j]
+    tf_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  tf_ranked_docs <- sort(rank(-tf_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # TF-IDF
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- as.numeric(1 * log(N_bar / K_bar[t1]))
+  query_scores[t2] <- as.numeric(1 * log(N_bar / K_bar[t2]))
+  tfidf_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- tfidf_score_submat[, j]
+    tfidf_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  tfidf_ranked_docs <- sort(rank(-tfidf_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # HGT
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- - phyper(0, as.numeric(K[t1]), N - as.numeric(K[t1]), n[j], lower.tail = FALSE, log.p = TRUE)
+  query_scores[t2] <- - phyper(0, as.numeric(K[t2]), N - as.numeric(K[t2]), n[j], lower.tail = FALSE, log.p = TRUE)
+  hgt_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- hgt_score_submat[, j]
+    hgt_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  hgt_ranked_docs <- sort(rank(-hgt_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # Summary
+  p10_mat[i, "HGT-RND"] <- top * top / length(union(term_to_doc_ids_lst[[t1]], term_to_doc_ids_lst[[t2]]))
+  p10_mat[i, "HGT-TF"] <- length(intersect(tf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+  p10_mat[i, "HGT-TFIDF"] <- length(intersect(tfidf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+  p10_mat[i, "TF-TFIDF"] <- length(intersect(tf_ranked_docs[1 : top], tfidf_ranked_docs[1 : top]))
+  
+}
+
+# Summary stats
+round(apply(p10_mat, 2, mean), digits = 2)
+round(apply(p10_mat, 2, sd), digits = 2)
+```
+
+
+```{r}
+# Calculate P@10 scores for all queries q = ("imf", t)
+# Use cosine similarity
+query_pair_terms <- setdiff(top_bursty_term, top_six_bursty_terms)
+number_of_queries <- length(query_pair_terms)
+p10_mat <-  mat.or.vec(nr = number_or_queries, nc = 4)
+colnames(p10_mat) <- c("HGT-RND", "HGT-TF", "HGT-TFIDF", "TF-TFIDF")
+t1 <- "imf"
+
+for (i in 1 : number_of_queries) {
+  # Initialize query vector
+  t2 <- query_pair_terms[i]
+  query <- c(t1, t2)
+
+  # TF
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- 1
+  query_scores[t2] <- 1
+  tf_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- tf_score_submat[, j]
+    tf_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  tf_ranked_docs <- sort(rank(-tf_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # TF-IDF
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- as.numeric(1 * log(N_bar / K_bar[t1]))
+  query_scores[t2] <- as.numeric(1 * log(N_bar / K_bar[t2]))
+  tfidf_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- tfidf_score_submat[, j]
+    tfidf_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  tfidf_ranked_docs <- sort(rank(-tfidf_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # HGT
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- - phyper(0, as.numeric(K[t1]), N - as.numeric(K[t1]), n[j], lower.tail = FALSE, log.p = TRUE)
+  query_scores[t2] <- - phyper(0, as.numeric(K[t2]), N - as.numeric(K[t2]), n[j], lower.tail = FALSE, log.p = TRUE)
+  hgt_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- hgt_score_submat[, j]
+    hgt_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  hgt_ranked_docs <- sort(rank(-hgt_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # Summary
+  p10_mat[i, "HGT-RND"] <- top * top / length(union(term_to_doc_ids_lst[[t1]], term_to_doc_ids_lst[[t2]]))
+  p10_mat[i, "HGT-TF"] <- length(intersect(tf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+  p10_mat[i, "HGT-TFIDF"] <- length(intersect(tfidf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+  p10_mat[i, "TF-TFIDF"] <- length(intersect(tf_ranked_docs[1 : top], tfidf_ranked_docs[1 : top]))
+  
+}
+
+# Summary stats
+round(apply(p10_mat, 2, mean), digits = 2)
+round(apply(p10_mat, 2, sd), digits = 2)
+```
+
+
+```{r}
+# Calculate P@10 scores for all queries q = ("comment", t)
+# Use cosine similarity
+query_pair_terms <- setdiff(top_bursty_term, top_six_bursty_terms)
+number_of_queries <- length(query_pair_terms)
+p10_mat <-  mat.or.vec(nr = number_or_queries, nc = 4)
+colnames(p10_mat) <- c("HGT-RND", "HGT-TF", "HGT-TFIDF", "TF-TFIDF")
+t1 <- "comment"
+
+for (i in 1 : number_of_queries) {
+  # Initialize query vector
+  t2 <- query_pair_terms[i]
+  query <- c(t1, t2)
+
+  # TF
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- 1
+  query_scores[t2] <- 1
+  tf_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- tf_score_submat[, j]
+    tf_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  tf_ranked_docs <- sort(rank(-tf_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # TF-IDF
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- as.numeric(1 * log(N_bar / K_bar[t1]))
+  query_scores[t2] <- as.numeric(1 * log(N_bar / K_bar[t2]))
+  tfidf_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- tfidf_score_submat[, j]
+    tfidf_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  tfidf_ranked_docs <- sort(rank(-tfidf_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # HGT
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- - phyper(0, as.numeric(K[t1]), N - as.numeric(K[t1]), n[j], lower.tail = FALSE, log.p = TRUE)
+  query_scores[t2] <- - phyper(0, as.numeric(K[t2]), N - as.numeric(K[t2]), n[j], lower.tail = FALSE, log.p = TRUE)
+  hgt_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- hgt_score_submat[, j]
+    hgt_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  hgt_ranked_docs <- sort(rank(-hgt_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # Summary
+  p10_mat[i, "HGT-RND"] <- top * top / length(union(term_to_doc_ids_lst[[t1]], term_to_doc_ids_lst[[t2]]))
+  p10_mat[i, "HGT-TF"] <- length(intersect(tf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+  p10_mat[i, "HGT-TFIDF"] <- length(intersect(tfidf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+  p10_mat[i, "TF-TFIDF"] <- length(intersect(tf_ranked_docs[1 : top], tfidf_ranked_docs[1 : top]))
+  
+}
+
+# Summary stats
+round(apply(p10_mat, 2, mean), digits = 2)
+round(apply(p10_mat, 2, sd), digits = 2)
+```
+
+
+```{r}
+# Calculate P@10 scores for all queries q = ("lagarde", t)
+# Use cosine similarity
+query_pair_terms <- setdiff(top_bursty_term, top_six_bursty_terms)
+number_of_queries <- length(query_pair_terms)
+p10_mat <-  mat.or.vec(nr = number_or_queries, nc = 4)
+colnames(p10_mat) <- c("HGT-RND", "HGT-TF", "HGT-TFIDF", "TF-TFIDF")
+t1 <- "lagarde"
+
+for (i in 1 : number_of_queries) {
+  # Initialize query vector
+  t2 <- query_pair_terms[i]
+  query <- c(t1, t2)
+
+  # TF
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- 1
+  query_scores[t2] <- 1
+  tf_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- tf_score_submat[, j]
+    tf_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  tf_ranked_docs <- sort(rank(-tf_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # TF-IDF
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- as.numeric(1 * log(N_bar / K_bar[t1]))
+  query_scores[t2] <- as.numeric(1 * log(N_bar / K_bar[t2]))
+  tfidf_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- tfidf_score_submat[, j]
+    tfidf_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  tfidf_ranked_docs <- sort(rank(-tfidf_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # HGT
+  query_scores <- numeric(cut) 
+  names(query_scores) <- top_bursty_term
+  query_scores[t1] <- - phyper(0, as.numeric(K[t1]), N - as.numeric(K[t1]), n[j], lower.tail = FALSE, log.p = TRUE)
+  query_scores[t2] <- - phyper(0, as.numeric(K[t2]), N - as.numeric(K[t2]), n[j], lower.tail = FALSE, log.p = TRUE)
+  hgt_cosine_sim_scores <- numeric(N_bar)
+  for (j in 1 : N_bar) {
+    doc_scores <- hgt_score_submat[, j]
+    hgt_cosine_sim_scores[j] <- sum(query_scores * doc_scores) / (sqrt(sum(query_scores ^ 2)) * sqrt(sum(doc_scores ^ 2)))
+  }
+  hgt_ranked_docs <- sort(rank(-hgt_cosine_sim_scores), index.return = TRUE)$ix
+  
+  # Summary
+  p10_mat[i, "HGT-RND"] <- top * top / length(union(term_to_doc_ids_lst[[t1]], term_to_doc_ids_lst[[t2]]))
+  p10_mat[i, "HGT-TF"] <- length(intersect(tf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+  p10_mat[i, "HGT-TFIDF"] <- length(intersect(tfidf_ranked_docs[1 : top], hgt_ranked_docs[1 : top]))
+  p10_mat[i, "TF-TFIDF"] <- length(intersect(tf_ranked_docs[1 : top], tfidf_ranked_docs[1 : top]))
+  
+}
+
+# Summary stats
+round(apply(p10_mat, 2, mean), digits = 2)
+round(apply(p10_mat, 2, sd), digits = 2)
+```
+
+

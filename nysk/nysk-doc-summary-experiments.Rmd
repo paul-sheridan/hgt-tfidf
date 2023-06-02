@@ -1,0 +1,180 @@
+---
+title: "Compare TF, TF-IDF, and HGT in the Document Summarization Scenario"
+author: "Paul Sheridan"
+output: html_notebook
+---
+
+## Notation
+
+Variables of note:
+
+  * term[i] = i'th term in vocabulary
+  * doc[[j]] = j'th doc in collection (unique terms)
+  * N_bar = number of documents in the collection
+  * T = number of unique terms in the collection
+  * N = total number of terms in the collection (including multiplicities)
+  * n_bar[j] = number of unique terms in doc[[j]]
+  * n[j] = number of terms in doc[[j]] (including multiplicities)
+  * K_bar[i] = number of docs in which term[i] occurs at least once
+  * K[i] = number of occurrences of term[i] in the collection
+  * k[[j]][i] = number of occurrences of term[i] in doc[[j]]
+  * X_score_lst[[j]][i] = (tf/tfidf/hyper geometric test) score of term[i] in doc[[j]]
+  * X_score_mat[i][j] = (tf/tfidf/hyper geometric test) score of term[i] in doc[[j]]
+
+
+## Preliminaries
+ 
+```{r}
+# Delete all variables initialized in R session, if any
+rm(list = ls())
+
+# Load libraries
+library(ggplot2)
+library(magicaxis)
+library(rjson)
+library(poweRlaw)
+library(here)
+
+# Set directory relative paths
+data_dir <- "stats"
+plots_dir <- "plots"
+
+# Set plot colors 
+gg_color_hue = function(n, alpha = 1) {
+  hues <- seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100, alpha = alpha)[1 : n]
+}
+cols <- c("grey25", gg_color_hue(n = 3))
+tcols <- c("grey25", gg_color_hue(n = 3, alpha = 0.5))
+gray25 <- cols[1]; red <- cols[2]; green <- cols[3]; blue <- cols[4]
+tred <- cols[2]; tgreen <- tcols[3]; tblue <- tcols[4]
+
+# Load various nysk dataset statistics
+load(here(data_dir, "N_bar-uppercase.Rdata"))
+load(here(data_dir, "N_bar-uppercase.Rdata"))
+load(here(data_dir, "K_bar-uppercase.Rdata"))
+load(here(data_dir, "n_bar-lowercase.Rdata"))
+load(here(data_dir, "doc.Rdata"))
+load(here(data_dir, "tf_score_lst.Rdata"))
+load(here(data_dir, "tp_score_lst.Rdata"))
+load(here(data_dir, "tfidf_score_lst.Rdata"))
+load(here(data_dir, "tpidf_score_lst.Rdata"))
+load(here(data_dir, "hgt_score_lst.Rdata"))
+```
+
+
+```{r}
+# Set random seed
+set.seed(63429)
+```
+
+
+
+## Document Summary Scenario: Compare HGT with TF-IDF
+
+```{r}
+# Find over-represented terms in documents overlap
+top <- 10
+M <- max(K_bar)
+p10_mat <- mat.or.vec(nr = N_bar, nc = 4)
+colnames(p10_mat) <- c("HGT-RND", "HGT-TF", "HGT-TFIDF", "TF-TFIDF")
+
+for (j in 1 : N_bar) {
+  myterms <- doc[[j]]
+  tf_ranked_terms <- myterms[sort(rank(-tf_score_lst[[j]], ties.method = "random"), index.return = TRUE)$ix]
+  tfidf_ranked_terms <- myterms[sort(rank(-tfidf_score_lst[[j]], ties.method = "random"), index.return = TRUE)$ix]
+  hgt_ranked_terms <- myterms[sort(rank(-hgt_score_lst[[j]], ties.method = "random"), index.return = TRUE)$ix]
+
+  if(n_bar[j] <= top) {
+    p10_mat[j, "HGT-RND"] <- top
+  } else {
+    p10_mat[j, "HGT-RND"] <- top * top / n_bar[j]
+  }
+
+  p10_mat[j, "HGT-TF"] <- length(intersect(hgt_ranked_terms[1 : top], tf_ranked_terms[1 : top]))
+  p10_mat[j, "HGT-TFIDF"] <- length(intersect(hgt_ranked_terms[1 : top], tfidf_ranked_terms[1 : top]))
+  p10_mat[j, "TF-TFIDF"] <- length(intersect(tf_ranked_terms[1 : top], tfidf_ranked_terms[1 : top]))
+}
+```
+
+
+```{r}
+# mean P@10 overlaps
+apply(p10_mat, 2, mean)
+```
+
+
+```{r}
+# P@10 overlap standard deviations
+apply(p10_mat, 2, sd)
+```
+
+
+```{r}
+# Generate P@10 overlap histogram
+myhist <- hist(
+  p10_mat[,"HGT-RND"],
+  breaks = seq(from = 0, to = top, by = 1),
+  plot = FALSE)
+counts1 <- myhist$counts
+
+myhist <- hist(
+  p10_mat[,"HGT-TFIDF"],
+  breaks = seq(from = 0, to = top, by = 1),
+  plot = FALSE)
+counts2 <- myhist$counts
+
+myhist <- hist(
+  p10_mat[,"HGT-TF"],
+  breaks = seq(from = 0, to = top, by = 1),
+  plot = FALSE)
+counts3 <- myhist$counts
+
+y1 <- 0
+y2 <- max(c(counts1, counts2, counts3))
+
+pdf(here(plots_dir, "figure-1b.pdf"), width = 6, height = 6)
+plot(
+  x = counts1,
+  main = "Document Summarization Scenario",
+  xlab = "P@10 Score",
+  ylab = "Number of Documents",
+  log = "x",
+  axes = FALSE,
+  type = "n")
+magaxis()
+
+for (i in 1 : top) {
+  rect(xleft = i - 1 + 0.5, ybottom = 0, xright = i + 0.5, ytop = counts1[i], col = tred)
+}
+
+for (i in 1 : top) {
+  rect(xleft = i - 1 + 0.5, ybottom = 0, xright = i + 0.5, ytop = counts2[i], col = tblue)
+}
+
+for (i in 1 : top) {
+  rect(xleft = i - 1 + 0.5, ybottom = 0, xright = i + 0.5, ytop = counts3[i], col = tgreen)
+}
+
+legend( 
+  "topright", 
+  c("Hypergeometric Test / Random", "Hypergeometric Test / TF", "Hypergeometric Test / TF-IDF"), 
+  fill = c(tred, tgreen, tblue),
+  cex = 0.9,
+  inset = 0.03,
+  box.lwd = 0,
+  box.col = "grey90",
+  bg = "grey90", 
+  seg.len = 4)
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,238 @@
+---
+title: "Generate Basic Summary Data for the NYSK Corpus"
+author: "Paul Sheridan"
+output: html_notebook
+---
+
+## Notation
+
+Variables of note:
+
+  * term[i] = i'th term in vocabulary
+  * doc[[j]] = j'th doc in collection (unique terms)
+  * N_bar = number of documents in the collection
+  * T = number of unique terms in the collection
+  * N = total number of terms in the collection (including multiplicities) 
+  * n_bar[j] = number of unique terms in doc[[j]]
+  * n[j] = number of terms in doc[[j]] (including multiplicities)
+  * K_bar[i] = number of docs in which term[i] occurs at least once
+  * K[i] = number of occurrences of term[i] in the collection
+  * k[[j]][i] = number of occurrences of term[i] in doc[[j]]
+  * X_score_lst[[j]][i] = (tf/tfidf/hyper geometric test) score of term[i] in doc[[j]]
+  * X_score_smat[i][j] = (tf/tfidf/hyper geometric test) score of term[i] in doc[[j]]
+  
+
+
+## Preliminaries
+ 
+```{r}
+# Delete all variables initialized in R session, if any
+rm(list = ls())
+
+# Load libraries
+library(rjson)
+library(here)
+library(Matrix)
+library(pryr)
+
+# Set directory relative paths
+data_dir <- "dataset"
+output_dir <- "stats"
+
+# Set random seed
+set.seed(12345)
+```
+
+
+
+## Read preprocessed NYSK corpus data and claculate some basic statistics
+
+```{r}
+# Read data
+infile <- "nysk-processed.json"
+raw_docs <- fromJSON(paste(readLines(here(data_dir, infile)), collapse = ""))
+```
+
+
+```{r}
+# Store corpus docs in list
+N_bar <- length(raw_docs)
+k <- vector("list", length = N_bar)
+doc <- vector("list", length = N_bar)
+
+for (j in 1 : N_bar) {
+  mydoc <- raw_docs[[j]]
+  mytable <- sort(table(mydoc), decreasing = TRUE)
+  k[[j]] <- as.numeric(mytable)
+  doc[[j]] <- names(mytable)
+}
+```
+
+
+```{r}
+# Calculate basic summary statistics
+n <- unlist(lapply(k, sum))
+n_bar <- unlist(lapply(k, length))
+term <- unique(unlist(doc))
+T <- length(term)
+N <- sum(unlist(k))
+K <- table(unlist(raw_docs))[term]
+K_bar <- table(unlist(doc))[term]
+```
+
+
+```{r}
+# Store summary stats for later use
+# You'll need to create the folder "stats" before running this
+save(doc, file = here(output_dir, "doc.Rdata"))
+save(k, file = here(output_dir, "k-lowercase.Rdata"))
+save(n, file = here(output_dir, "n-lowercase.Rdata"))
+save(n_bar, file = here(output_dir, "n_bar-lowercase.Rdata"))
+save(term, file = here(output_dir, "term.Rdata"))
+save(T, file = here(output_dir, "T-uppercase.Rdata"))
+save(N, file = here(output_dir, "N-uppercase.Rdata"))
+save(N_bar, file = here(output_dir, "N_bar-uppercase.Rdata"))
+save(K, file = here(output_dir, "K-uppercase.Rdata"))
+save(K_bar, file = here(output_dir, "K_bar-uppercase.Rdata"))
+```
+
+
+```{r}
+# Calculate list of which docs each term occurs in
+term_to_doc_ids_lst <- vector("list", length = T)
+names(term_to_doc_ids_lst) <- term
+
+for (i in 1 : T) {
+  count <- 1
+  term_to_doc_ids <- numeric(K_bar[i])
+  
+  for (j in 1 : N_bar) {
+    if (term[i] %in% doc[[j]]) {
+      term_to_doc_ids[count] <- j
+      count <- count + 1
+    }
+  }
+
+  term_to_doc_ids_lst[[i]] <- term_to_doc_ids
+}
+
+# Save for later use
+save(term_to_doc_ids_lst, file = here(output_dir, "term_to_doc_ids_lst.Rdata"))
+```
+
+
+
+## Calculate term scoring function values
+
+```{r}
+# Calculate term score lists
+tf_score_lst <- vector("list", length = N_bar)
+tp_score_lst <- vector("list", length = N_bar)
+tfidf_score_lst <- vector("list", length = N_bar)
+hgt_score_lst <- vector("list", length = N_bar)
+
+for (j in 1 : N_bar) {
+  tf_score_lst[[j]] <- numeric(n_bar[j])
+  tp_score_lst[[j]] <- numeric(n_bar[j])
+  tfidf_score_lst[[j]] <- numeric(n_bar[j])
+  hgt_score_lst[[j]] <- numeric(n_bar[j])
+
+  for (i in 1 : n_bar[j]) {
+    tf_score_lst[[j]][i] <- k[[j]][i]
+    tp_score_lst[[j]][i] <- k[[j]][i] / n[j]
+    tfidf_score_lst[[j]][i] <- - k[[j]][i] * log(K_bar[doc[[j]][i]] / N_bar)
+    hgt_score_lst[[j]][i] <- - phyper(k[[j]][i] - 1, K[doc[[j]][i]], N - K[doc[[j]][i]], n[j], lower.tail = FALSE, log.p = TRUE)
+  }
+}
+```
+
+
+```{r}
+# Save for later use
+save(tf_score_lst, file = here(output_dir, "tf_score_lst.Rdata"))
+save(tp_score_lst, file = here(output_dir, "tp_score_lst.Rdata"))
+save(tfidf_score_lst, file = here(output_dir, "tfidf_score_lst.Rdata"))
+save(hgt_score_lst, file = here(output_dir, "hgt_score_lst.Rdata"))
+```
+
+
+```{r}
+# Calculate tf term score by document matrix
+tf_score_mat <- mat.or.vec(nr = T, nc = N_bar)
+rownames(tf_score_mat) <- term
+
+for (i in 1 : T) {
+  for (l in 1 : K_bar[i]) {
+    j <- term_to_doc_ids_lst[[i]][l]
+    tf_score_mat[i, j] <- tf_score_lst[[j]][which(doc[[j]] == term[i])]
+  }
+}
+tf_score_smat <- Matrix(tf_score_mat, sparse = TRUE)
+writeMM(obj = tf_score_smat, file = here(output_dir, "tf_score_smat.mtx"))
+rm(tf_score_mat)
+```
+
+
+```{r}
+# Calculate tp term score by document matrix
+tp_score_mat <- mat.or.vec(nr = T, nc = N_bar)
+rownames(tp_score_mat) <- term
+
+for (i in 1 : T) {
+  for (l in 1 : K_bar[i]) {
+    j <- term_to_doc_ids_lst[[i]][l]
+    tp_score_mat[i, j] <- tp_score_lst[[j]][which(doc[[j]] == term[i])]
+  }
+}
+tp_score_smat <- Matrix(tp_score_mat, sparse = TRUE)
+writeMM(obj = tp_score_smat, file = here(output_dir, "tp_score_smat.mtx"))
+#rm(tp_score_mat)
+```
+
+
+```{r}
+# Calculate tf-idf term score by document matrix
+tfidf_score_mat <- mat.or.vec(nr = T, nc = N_bar)
+rownames(tfidf_score_mat) <- term
+
+for (i in 1 : T) {
+  for (l in 1 : K_bar[i]) {
+    j <- term_to_doc_ids_lst[[i]][l]
+    tfidf_score_mat[i, j] <- tfidf_score_lst[[j]][which(doc[[j]] == term[i])]
+  }
+}
+tfidf_score_smat <- Matrix(tfidf_score_mat, sparse = TRUE)
+writeMM(obj = tfidf_score_smat, file = here(output_dir, "tfidf_score_smat.mtx"))
+rm(tfidf_score_mat)
+```
+
+
+```{r}
+# Calculate hypergeometric test term score by document matrix
+hgt_score_mat <- mat.or.vec(nr = T, nc = N_bar)
+rownames(hgt_score_mat) <- term
+
+for (i in 1 : T) {
+  for (l in 1 : K_bar[i]) {
+    j <- term_to_doc_ids_lst[[i]][l]
+    hgt_score_mat[i, j] <- hgt_score_lst[[j]][which(doc[[j]] == term[i])]
+  }
+}
+hgt_score_smat <- Matrix(hgt_score_mat, sparse = TRUE)
+writeMM(obj = hgt_score_smat, file = here(output_dir, "hgt_score_smat.mtx"))
+rm(hgt_score_mat)
+```
+
+
+
+## Calculate term burstiness scores
+
+```{r}
+# Calculate term burstiness scores
+term_burstiness_score <- apply(tp_score_mat, 1, sum) / K_bar
+save(term_burstiness_score, file = here(output_dir, "term_burstiness_score.Rdata"))
+```
+
+
+
+

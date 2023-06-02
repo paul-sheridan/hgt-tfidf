@@ -1,0 +1,200 @@
+---
+title: "Compare TF, TF-IDF, and HGT in the One-term Query Document Retrieval Scenario"
+author: "Paul Sheridan"
+output: html_notebook
+---
+
+## Notation
+
+Variables of note:
+
+  * term[i] = i'th term in vocabulary
+  * doc[[j]] = j'th doc in collection (unique terms)
+  * N_bar = number of documents in the collection
+  * T = number of unique terms in the collection
+  * N = total number of terms in the collection (including multiplicities) 
+  * n_bar[j] = number of unique terms in doc[[j]]
+  * n[j] = number of terms in doc[[j]] (including multiplicities)
+  * K_bar[i] = number of docs in which term[i] occurs at least once
+  * K[i] = number of occurrences of term[i] in the collection
+  * k[[j]][i] = number of occurrences of term[i] in doc[[j]]
+  * X_score_lst[[j]][i] = (tf/tfidf/hyper geometric test) score of term[i] in doc[[j]]
+  * X_score_smat[i][j] = (tf/tfidf/hyper geometric test) score of term[i] in doc[[j]]
+
+
+
+## Preliminaries
+ 
+```{r}
+# Delete all variables initialized in R session, if any
+rm(list = ls())
+
+# Load libraries
+library(ggplot2)
+library(magicaxis)
+library(rjson)
+library(poweRlaw)
+library(here)
+library(Matrix)
+
+# Set directory relative paths
+data_dir <- "stats"
+plots_dir <- "plots"
+
+# Set plot colors 
+gg_color_hue = function(n, alpha = 1) {
+  hues <- seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100, alpha = alpha)[1 : n]
+}
+cols <- c("grey25", gg_color_hue(n = 3))
+tcols <- c("grey25", gg_color_hue(n = 3, alpha = 0.5))
+gray25 <- cols[1]; red <- cols[2]; green <- cols[3]; blue <- cols[4]
+tred <- cols[2]; tgreen <- tcols[3]; tblue <- tcols[4]
+```
+
+
+```{r}
+# Set random seed
+set.seed(935649)
+```
+
+
+```{r}
+# Load variables
+load(here(data_dir, "T-uppercase.Rdata"))
+load(here(data_dir, "N_bar-uppercase.Rdata"))
+load(here(data_dir, "K_bar-uppercase.Rdata"))
+load(here(data_dir, "n_bar-lowercase.Rdata"))
+load(here(data_dir, "doc.Rdata"))
+load(here(data_dir, "term_to_doc_ids_lst.Rdata"))
+load(here(data_dir, "term.Rdata"))
+tf_score_smat <- readMM(here(data_dir, "tf_score_smat.mtx"))
+tfidf_score_smat <- readMM(here(data_dir, "tfidf_score_smat.mtx"))
+hgt_score_smat <- readMM(here(data_dir, "hgt_score_smat.mtx"))
+```
+
+
+## TF-IDF/HGT comparison
+
+```{r}
+# P@k value
+top <- 10
+
+# Calculate p@10 scores for all individual terms in the collection
+p10_mat_exp1 <-  mat.or.vec(nr = T, nc = 4)
+colnames(p10_mat_exp1) <- c("HGT-RND", "HGT-TF", "HGT-TFIDF", "TF-TFIDF")
+
+for (i in 1 : T) {
+  if (i %% 5000 == 0) { print(i) }
+  doc_ids <- term_to_doc_ids_lst[[i]]
+  tf_top_ranked_docs <- sort(rank(-tf_score_smat[i, doc_ids], ties.method = "average"), index.return = TRUE)$ix[1 : top]
+  tfidf_top_ranked_docs <- sort(rank(-tfidf_score_smat[i, doc_ids], ties.method = "average"), index.return = TRUE)$ix[1 : top]
+  hgt_top_ranked_docs <- sort(rank(-hgt_score_smat[i, doc_ids], ties.method = "average"), index.return = TRUE)$ix[1 : top]
+  
+  if (K_bar[i] <= top) {
+    p10_mat_exp1[i, "HGT-RND"] <- top
+    p10_mat_exp1[i, "HGT-TF"] <- top
+    p10_mat_exp1[i, "HGT-TFIDF"] <- top
+    p10_mat_exp1[i, "TF-TFIDF"] <- top 
+  } else {
+    p10_mat_exp1[i, "HGT-RND"] <- top * top / K_bar[i]
+    p10_mat_exp1[i, "HGT-TF"] <- length(intersect(hgt_top_ranked_docs, tf_top_ranked_docs))
+    p10_mat_exp1[i, "HGT-TFIDF"] <- length(intersect(hgt_top_ranked_docs, tfidf_top_ranked_docs))
+    p10_mat_exp1[i, "TF-TFIDF"] <- length(intersect(tf_top_ranked_docs, tfidf_top_ranked_docs))
+  }
+}
+```
+
+
+```{r}
+# Save to file
+save(p10_mat_exp1, file = here(data_dir, "p10_mat_exp1.Rdata"))
+```
+
+
+```{r}
+# Summary stats
+apply(p10_mat_exp1, 2, mean)
+```
+
+
+```{r}
+# P@10 scores by cutoff C
+M <- max(K_bar)
+p10_mat_at_C_exp1 <-  mat.or.vec(nr = M, nc = 4)
+colnames(p10_mat_at_C_exp1) <- c("HGT-RND", "HGT-TF", "HGT-TFIDF", "TF-TFIDF")
+
+for (C in 1 : M) {
+  indices <- which(K_bar >= C)
+  p10_mat_at_C_exp1[C, "HGT-RND"] <- mean(p10_mat_exp1[indices, "HGT-RND"])
+  p10_mat_at_C_exp1[C, "HGT-TF"] <- mean(p10_mat_exp1[indices, "HGT-TF"])
+  p10_mat_at_C_exp1[C, "HGT-TFIDF"] <- mean(p10_mat_exp1[indices, "HGT-TFIDF"])
+  p10_mat_at_C_exp1[C, "TF-TFIDF"] <- mean(p10_mat_exp1[indices, "TF-TFIDF"])
+}
+
+save(p10_mat_at_C_exp1, file = here(data_dir, "p10_mat_at_C_exp1.Rdata"))
+```
+
+
+```{r}
+# Make cutoff plot
+# Create a "plots" folder to avoid getting an error on save
+x <- 1 : M
+y1 <- p10_mat_at_C_exp1[, "TF-TFIDF"]
+y2 <- p10_mat_at_C_exp1[, "HGT-TFIDF"]
+y3 <- p10_mat_at_C_exp1[, "HGT-RND"]
+
+pdf(here(plots_dir, "figure-1a.pdf"), width = 6, height = 6)
+plot(x = x,
+  y = y1,
+  xlab = "Cutoff Value, C",
+  ylab = "Average P@10 Score",
+  main = "Document Retrieval Scenario",
+  ylim = c(0, 10),
+  type = "n",
+  log = "x",
+  axes = FALSE)
+grid(lwd = 2)
+magaxis()
+points(x = x,
+  y = y1,
+  type = "l",
+  lty = "dashed",
+  lwd = 2,
+  col = gray25)
+points(x = x,
+  y = y2,
+  type = "l",
+  lwd = 2,
+  col = gray25)
+points(x = x,
+  y = y3,
+  type = "l",
+  lty = "dotted",
+  lwd = 3,
+  col = gray25)
+legend( 
+  "topright", 
+  c("TF / TF-IDF", "Hypergeometric Test / TF-IDF", "Hypergeometric Test / Random"), 
+  col = c(gray25, gray25), 
+  lty = c("dashed", "solid", "dotted"), 
+  lwd = c(2, 2, 3), 
+  cex = 0.9,
+  inset = 0.08,
+  box.lwd = 0,
+  box.col = "grey90",
+  bg = "grey90", 
+  seg.len = 4)
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+
+

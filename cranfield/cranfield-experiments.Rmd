@@ -1,0 +1,516 @@
+---
+title: "Cranfield Collection Case Study Analysis"
+author: "Paul Sheridan"
+output: html_notebook
+---
+
+## Preliminaries
+
+```{r}
+# Delete all variables initialized in R session, if any
+rm(list = ls())
+
+# Load libraries
+library(rjson)
+library(here)
+library(purrr)
+
+# Set directory relative paths
+data_dir <- "dataset"
+output_dir <- "stats"
+```
+
+
+
+## Read Preprocessed Data
+
+```{r}
+# Read preprocessed documents
+infile <- here(data_dir, "cran-docs-preprocessed.json")
+raw_docs_lst <- fromJSON(file = infile)
+```
+
+
+```{r}
+# Remove any empty documents
+raw_doc_lengths <- lapply(raw_docs_lst, length)
+empty_doc_ids <- as.numeric(which(raw_doc_lengths == 0))
+cat("\nIds of empty documents:\n")
+empty_doc_ids
+docs_lst <- compact(raw_docs_lst)
+cat("\nNumber of documents:\n")
+length(docs_lst)
+```
+
+
+```{r}
+# Read preprocessed queries
+infile <- here(data_dir, "cran-queries-preprocessed.json")
+queries_lst <- fromJSON(file = infile)
+```
+
+
+```{r}
+# Remove empty queries, if any
+query_lengths <- lapply(queries_lst, length)
+which(query_lengths == 0)
+```
+
+
+## Calculate Basic Summary Statistics
+
+```{r}
+# Calculate vocabulary size
+vocabulary <- sort(unique(unlist(docs_lst)))
+T <- length(vocabulary)
+cat("\nVocabulary size:\n")
+T
+```
+
+
+```{r}
+# Are there any words in the queries that do not occur in the doc texts?
+# If so remove them
+doc_vocabulary <- sort(unique(unlist(docs_lst)))
+query_vocabulary <- sort(unique(unlist(queries_lst)))
+drop_words <- setdiff(query_vocabulary, doc_vocabulary)
+cat("\nQuery terms not occurring in documents:\n")
+drop_words
+
+for(j in 1 : length(queries_lst)) {
+  query_lst <- queries_lst[[j]]
+  queries_lst[[j]] <- query_lst[!query_lst %in% drop_words]
+}
+```
+
+
+```{r}
+# Check no words are in queries not in documents
+doc_vocabulary <- sort(unique(unlist(docs_lst)))
+query_vocabulary <- sort(unique(unlist(queries_lst)))
+setdiff(query_vocabulary, doc_vocabulary)
+```
+
+
+```{r}
+# Calculate document statistics
+doc_ids <- as.numeric(names(docs_lst))
+N_bar <- length(docs_lst)
+k <- vector("list", length = N_bar)
+docs <- vector("list", length = N_bar)
+
+for (j in 1 : N_bar) {
+  doc <- docs_lst[[j]]
+  mytable <- sort(table(doc), decreasing = TRUE)
+  k[[j]] <- as.numeric(mytable)
+  docs[[j]] <- names(mytable)
+}
+
+n <- unlist(lapply(k, sum))
+n_bar <- unlist(lapply(k, length))
+N <- sum(unlist(k))
+K <- table(unlist(docs_lst))[vocabulary]
+K_bar <- table(unlist(docs))[vocabulary]
+```
+
+
+```{r}
+# Calculate query statistics
+query_ids <- as.numeric(names(queries_lst))
+qN_bar <- length(queries_lst)
+qk <- vector("list", length = qN_bar)
+queries <- vector("list", length = qN_bar)
+
+for (j in 1 : qN_bar) {
+  query <- queries_lst[[j]]
+  mytable <- sort(table(query), decreasing = TRUE)
+  qk[[j]] <- as.numeric(mytable)
+  queries[[j]] <- names(mytable)
+}
+
+qn <- unlist(lapply(qk, sum))
+qn_bar <- unlist(lapply(qk, length))
+qN <- sum(unlist(qk))
+qK <- table(unlist(queries_lst))[vocabulary]
+qK_bar <- table(unlist(queries))[vocabulary]
+```
+
+
+## Calculate Term-in-Document Weights
+
+```{r}
+# TF, TF-IDF, and HGT term-in-document weights
+tf_scores_lst <- vector("list", length = N_bar)
+tfidf_scores_lst <- vector("list", length = N_bar)
+hgt_scores_lst <- vector("list", length = N_bar)
+
+for (j in 1 : N_bar) {
+  tf_scores_lst[[j]] <- numeric(n_bar[j])
+  tfidf_scores_lst[[j]] <- numeric(n_bar[j])
+  hgt_scores_lst[[j]] <- numeric(n_bar[j])
+
+  for (i in 1 : n_bar[j]) {
+    tf_scores_lst[[j]][i] <- - k[[j]][i]
+    tfidf_scores_lst[[j]][i] <- - k[[j]][i] * log(K_bar[docs[[j]][i]] / N_bar)
+    hgt_scores_lst[[j]][i] <- - phyper(k[[j]][i] - 1, K[docs[[j]][i]], N - K[docs[[j]][i]], n[j], lower.tail = FALSE, log.p = TRUE)
+  }
+}
+```
+
+
+```{r}
+# TF, TF-IDF, and HGT term-in-query weights
+qtf_scores_lst <- vector("list", length = qN_bar)
+qtfidf_scores_lst <- vector("list", length = qN_bar)
+qhgt_scores_lst <- vector("list", length = qN_bar)
+
+for (j in 1 : qN_bar) {
+  qtf_scores_lst[[j]] <- numeric(qn_bar[j])
+  qtfidf_scores_lst[[j]] <- numeric(qn_bar[j])
+  qhgt_scores_lst[[j]] <- numeric(qn_bar[j])
+
+  for (i in 1 : qn_bar[j]) {
+    qtf_scores_lst[[j]][i] <- - qk[[j]][i]
+    qtfidf_scores_lst[[j]][i] <- - qk[[j]][i] * log(qK_bar[queries[[j]][i]] / qN_bar)
+    qhgt_scores_lst[[j]][i] <- - phyper(qk[[j]][i] - 1, qK[queries[[j]][i]], qN - qK[queries[[j]][i]], qn[j], lower.tail = FALSE, log.p = TRUE)
+  }
+}
+```
+
+
+## Calculate Relevance Scores
+
+```{r}
+# Calculate TF relevance scores (columns are queries, rows are documents)
+tf_relevance_scores <- mat.or.vec(nr = N_bar, nc = qN_bar)
+rownames(tf_relevance_scores) <- as.character(doc_ids)
+colnames(tf_relevance_scores) <- as.character(query_ids)
+
+for(q in 1 : qN_bar) {
+  qtf_score <- qtf_scores_lst[[q]]
+  names(qtf_score) <- queries[[q]]
+  
+  for(j in 1 : N_bar) {
+    tf_score <- tf_scores_lst[[j]]
+    names(tf_score) <- docs[[j]]
+  
+    common_words <- intersect(names(qtf_score), names(tf_score))
+    
+    if(length(common_words > 0)) {
+      relevance_score <- sum(qtf_score[common_words] * tf_score[common_words]) / (sum(qtf_score ^ 2) * sum(tf_score ^ 2))
+      tf_relevance_scores[j, q] <- relevance_score
+    }
+  }
+}
+```
+
+
+```{r}
+# Calculate TF-IDF relevance scores (columns are queries, rows are documents)
+tfidf_relevance_scores <- mat.or.vec(nr = N_bar, nc = qN_bar)
+rownames(tfidf_relevance_scores) <- as.character(doc_ids)
+colnames(tfidf_relevance_scores) <- as.character(query_ids)
+
+for(q in 1 : qN_bar) {
+  qtfidf_score <- qtfidf_scores_lst[[q]]
+  names(qtfidf_score) <- queries[[q]]
+  
+  for(j in 1 : N_bar) {
+    tfidf_score <- tfidf_scores_lst[[j]]
+    names(tfidf_score) <- docs[[j]]
+  
+    common_words <- intersect(names(qtfidf_score), names(tfidf_score))
+    
+    if(length(common_words > 0)) {
+      relevance_score <- sum(qtfidf_score[common_words] * tfidf_score[common_words]) / (sum(qtfidf_score ^ 2) * sum(tfidf_score ^ 2))
+      tfidf_relevance_scores[j, q] <- relevance_score
+    }
+  }
+}
+```
+
+
+```{r}
+# Calculate HGT relevance scores (columns are queries, rows are documents)
+hgt_relevance_scores <- mat.or.vec(nr = N_bar, nc = qN_bar)
+rownames(hgt_relevance_scores) <- as.character(doc_ids)
+colnames(hgt_relevance_scores) <- as.character(query_ids)
+
+for(q in 1 : qN_bar) {
+  qhgt_score <- qhgt_scores_lst[[q]]
+  names(qhgt_score) <- queries[[q]]
+  
+  for(j in 1 : N_bar) {
+    hgt_score <- hgt_scores_lst[[j]]
+    names(hgt_score) <- docs[[j]]
+  
+    common_words <- intersect(names(qhgt_score), names(hgt_score))
+    
+    if(length(common_words > 0)) {
+      relevance_score <- sum(qhgt_score[common_words] * hgt_score[common_words]) / (sum(qhgt_score ^ 2) * sum(hgt_score ^ 2))
+      hgt_relevance_scores[j, q] <- relevance_score
+    }
+  }
+}
+```
+
+
+
+## Examine Overlap between TP-IDF and HGT Results
+
+```{r}
+# P@10 scores for overlap of TF-IDF and HGT identified documents
+top <- 10
+p_at_k_scores <- numeric(qN_bar)
+
+for (q in 1 : qN_bar) {
+  tfidf_query_result <- tfidf_relevance_scores[, q]
+  tfidf_top_k <- as.numeric(names(sort(rank(tfidf_query_result, ties.method = "random"), decreasing = TRUE))[1 : top])
+  hgt_query_result <- hgt_relevance_scores[, q]
+  hgt_top_k <- as.numeric(names(sort(rank(hgt_query_result, ties.method = "random"), decreasing = TRUE))[1 : top])
+  p_at_k_scores[q] <- length(intersect(tfidf_top_k, hgt_top_k))
+}
+```
+
+
+
+## Evaluate Performance
+
+```{r}
+# Read relevance scores
+groundtruth <- read.table(here(data_dir, "cranqrel.trec.txt"), header = FALSE, col.names = c("query_id", "iteration", "doc_id", "relevance"))[, -2]
+
+# Remove rows containing empty documents, if any
+drop_row_ids <- which(groundtruth$doc_id %in% empty_doc_ids)
+if (length(drop_row_ids) > 0) {
+  groundtruth <- groundtruth[-drop_row_ids, ]
+}
+```
+
+
+```{r}
+# Calculate precision at k matrices
+tf_precision <- mat.or.vec(nr = N_bar, nc = qN_bar)
+rownames(tf_precision) <- as.character(doc_ids)
+colnames(tf_precision) <- as.character(query_ids)
+
+tfidf_precision <- mat.or.vec(nr = N_bar, nc = qN_bar)
+rownames(tfidf_precision) <- as.character(doc_ids)
+colnames(tfidf_precision) <- as.character(query_ids)
+
+hgt_precision <- mat.or.vec(nr = N_bar, nc = qN_bar)
+rownames(hgt_precision) <- as.character(doc_ids)
+colnames(hgt_precision) <- as.character(query_ids)
+
+# Calculate recall at k matrices
+tf_recall <- mat.or.vec(nr = N_bar, nc = qN_bar)
+rownames(tf_recall) <- as.character(doc_ids)
+colnames(tf_recall) <- as.character(query_ids)
+
+tfidf_recall <- mat.or.vec(nr = N_bar, nc = qN_bar)
+rownames(tfidf_recall) <- as.character(doc_ids)
+colnames(tfidf_recall) <- as.character(query_ids)
+
+hgt_recall <- mat.or.vec(nr = N_bar, nc = qN_bar)
+rownames(hgt_recall) <- as.character(doc_ids)
+colnames(hgt_recall) <- as.character(query_ids)
+
+for (q in 1 : qN_bar) {
+  # Get relevant docs to query
+  query_id <- query_ids[q]
+  relevant_docs <- groundtruth[which(groundtruth$query_id == q & groundtruth$relevance == 1), "doc_id"]
+  
+  # Sort retrieved docs
+  tf_query_result <- as.numeric(names(sort(rank(tf_relevance_scores[, q], ties.method = "random"), decreasing = TRUE)))
+  tfidf_query_result <- as.numeric(names(sort(rank(tfidf_relevance_scores[, q], ties.method = "random"), decreasing = TRUE)))
+  hgt_query_result <- as.numeric(names(sort(rank(hgt_relevance_scores[, q], ties.method = "random"), decreasing = TRUE)))
+                                   
+  for (k in 1 : N_bar) {
+    # TF precision at k and recall at k
+    tf_retrieved_docs <- tf_query_result[1 : k]
+    tf_precision[k, q] <- length(intersect(relevant_docs, tf_retrieved_docs)) / length(tf_retrieved_docs)
+    tf_recall[k, q] <- length(intersect(relevant_docs, tf_retrieved_docs)) / length(relevant_docs)
+    
+    # TF-IDF precision at k and recall at k
+    tfidf_retrieved_docs <- tfidf_query_result[1 : k]
+    tfidf_precision[k, q] <- length(intersect(relevant_docs, tfidf_retrieved_docs)) / length(tfidf_retrieved_docs)
+    tfidf_recall[k, q] <- length(intersect(relevant_docs, tfidf_retrieved_docs)) / length(relevant_docs)
+  
+    # HGT precision at k
+    hgt_retrieved_docs <- hgt_query_result[1 : k]
+    hgt_precision[k, q] <- length(intersect(relevant_docs, hgt_retrieved_docs)) / length(hgt_retrieved_docs)
+    hgt_recall[k, q] <- length(intersect(relevant_docs, hgt_retrieved_docs)) / length(relevant_docs)
+  }
+}
+```
+
+
+```{r}
+# Precision at 10 scores
+k = 10
+mean(tf_precision[k, ])
+mean(tfidf_precision[k, ])
+mean(hgt_precision[k, ])
+```
+
+
+```{r}
+# Precision at 50 scores
+k = 50
+mean(tf_precision[k, ])
+mean(tfidf_precision[k, ])
+mean(hgt_precision[k, ])
+```
+
+
+```{r}
+# Precision at 100 scores
+k = 100
+mean(tf_precision[k, ])
+mean(tfidf_precision[k, ])
+mean(hgt_precision[k, ])
+```
+
+
+```{r}
+# Calculate F1 Score at k = 10
+k = 10
+f_score <- mat.or.vec(nr = qN_bar, nc = 3) 
+rownames(f_score) <- query_ids
+colnames(f_score) <- c("tf", "tfidf", "hgt")
+
+for (q in 1 : qN_bar) {
+  # TF
+  f_score[q, "tf"] <- 2 * (tf_precision[k, q] * tf_recall[k, q]) / (tf_precision[k, q] + tf_recall[k, q])
+  
+  # TF-IDF
+  f_score[q, "tfidf"] <- 2 * (tfidf_precision[k, q] * tfidf_recall[k, q]) / (tfidf_precision[k, q] + tfidf_recall[k, q])
+  
+  # HGT
+  f_score[q, "hgt"] <- 2 * (hgt_precision[k, q] * hgt_recall[k, q]) / (hgt_precision[k, q] + hgt_recall[k, q])
+}
+
+# Average F1 Scores over queries
+f_tf <- mean(f_score[, "tf"], na.rm = TRUE)
+f_tfidf <- mean(f_score[, "tfidf"], na.rm = TRUE)
+f_hgt <- mean(f_score[, "hgt"], na.rm = TRUE)
+f_tf
+f_tfidf
+f_hgt
+```
+
+
+```{r}
+# Calculate Average Precision
+avg_precision <- mat.or.vec(nr = qN_bar, nc = 3)
+rownames(avg_precision) <- query_ids
+colnames(avg_precision) <- c("tf", "tfidf", "hgt")
+
+for (q in 1 : qN_bar) {
+  # Get relevant docs to query
+  query_id <- query_ids[q]
+  relevant_docs <- groundtruth[which(groundtruth$query_id == q & groundtruth$relevance == 1), "doc_id"]
+  number_of_relevant_docs <- length(relevant_docs)
+  
+  # TF
+  tf_query_result <- as.numeric(names(sort(rank(tf_relevance_scores[, q], ties.method = "random"), decreasing = TRUE)))
+  relevant_doc_ranks <- match(relevant_docs, tf_query_result)
+  avg_precision[q, "tf"] <- sum(tf_precision[relevant_doc_ranks, q]) / number_of_relevant_docs
+  
+  # TF-IDF
+  tfidf_query_result <- as.numeric(names(sort(rank(tfidf_relevance_scores[, q], ties.method = "random"), decreasing = TRUE)))
+  relevant_doc_ranks <- match(relevant_docs, tfidf_query_result)
+  avg_precision[q, "tfidf"] <- sum(tfidf_precision[relevant_doc_ranks, q]) / number_of_relevant_docs
+  
+  # HGT
+  hgt_query_result <- as.numeric(names(sort(rank(hgt_relevance_scores[, q], ties.method = "random"), decreasing = TRUE)))
+  relevant_doc_ranks <- match(relevant_docs, hgt_query_result)
+  avg_precision[q, "hgt"] <- sum(hgt_precision[relevant_doc_ranks, q]) / number_of_relevant_docs
+}
+
+# Calculate Mean Average Precision
+map_tf <- mean(avg_precision[, "tf"])
+map_tfidf <- mean(avg_precision[, "tfidf"])
+map_hgt <- mean(avg_precision[, "hgt"])
+map_tf
+map_tfidf
+map_hgt
+```
+
+
+```{r}
+# Calculate Mean Reciprocal Rank
+mrr_tf <- 0
+mrr_tfidf <- 0
+mrr_hgt <- 0
+
+for (q in 1 : qN_bar) {
+  query_id <- query_ids[q]
+  relevant_docs <- groundtruth[which(groundtruth$query_id == q & groundtruth$relevance == 1), "doc_id"]
+  
+  # TF
+  tf_query_result <- as.numeric(names(sort(rank(tf_relevance_scores[, q], ties.method = "random"), decreasing = TRUE)))
+  relevant_doc_ranks <- match(relevant_docs, tf_query_result)
+  most_relevant_doc_rank <- min(relevant_doc_ranks)
+  mrr_tf <- mrr_tf + 1 / most_relevant_doc_rank
+  
+  # TF-IDF
+  tfidf_query_result <- as.numeric(names(sort(rank(tfidf_relevance_scores[, q], ties.method = "random"), decreasing = TRUE)))
+  relevant_doc_ranks <- match(relevant_docs, tfidf_query_result)
+  most_relevant_doc_rank <- min(relevant_doc_ranks)
+  mrr_tfidf <- mrr_tfidf + 1 / most_relevant_doc_rank
+  
+  # HGT
+  hgt_query_result <- as.numeric(names(sort(rank(hgt_relevance_scores[, q], ties.method = "random"), decreasing = TRUE)))
+  relevant_doc_ranks <- match(relevant_docs, hgt_query_result)
+  most_relevant_doc_rank <- min(relevant_doc_ranks)
+  mrr_hgt <- mrr_hgt + 1 / most_relevant_doc_rank
+}
+
+mrr_tf <- mrr_tf / qN_bar
+mrr_tfidf <- mrr_tfidf / qN_bar
+mrr_hgt <- mrr_hgt / qN_bar
+mrr_tf
+mrr_tfidf
+mrr_hgt
+```
+
+
+```{r}
+# Calculate Geometric Mean Average Precision
+
+# TF
+x <- avg_precision[, "tf"]
+if (0 %in% x) {
+  min_nonzero_hgt_score <- min(x[x > 0])
+  x[which(x == 0)] <- min_nonzero_hgt_score
+  avg_precision[, "tf"] <- x
+}
+gmap_tf <- exp(sum(log(avg_precision[, "tf"])) / qN_bar)
+
+# TF-IDF
+x <- avg_precision[, "tfidf"]
+if (0 %in% x) {
+  min_nonzero_hgt_score <- min(x[x > 0])
+  x[which(x == 0)] <- min_nonzero_hgt_score
+  avg_precision[, "tfidf"] <- x
+}
+gmap_tfidf <- exp(sum(log(avg_precision[, "tfidf"])) / qN_bar)
+
+# HGT
+x <- avg_precision[, "hgt"]
+if (0 %in% x) {
+  min_nonzero_hgt_score <- min(x[x > 0])
+  x[which(x == 0)] <- min_nonzero_hgt_score
+  avg_precision[, "hgt"] <- x
+}
+gmap_hgt <- exp(sum(log(avg_precision[, "hgt"])) / qN_bar)
+
+gmap_tf
+gmap_tfidf
+gmap_hgt
+```
+
+
+
+

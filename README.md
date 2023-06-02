@@ -1,5 +1,5 @@
-# A Hypergeometric Test Interpretation of a Common tf-idf Variant Computer Code
-This repository contains computer code for reproducing the results described in the manuscript “A hypergeometric test interpretation of a common tf-idf variant”. ArXiv preprint link: https://arxiv.org/abs/2002.11844. Research Gate link: https://www.researchgate.net/publication/339550104_A_hypergeometric_test_interpretation_of_a_common_tf-idf_variant.
+# The Hypergeometric Test Performs Comparably to TF-IDF on Standard Text Analysis Tasks Computer Code
+This repository contains computer code for reproducing the results described in the manuscript “The hypergeometric test performs comparably to TF-IDF on standard text analysis tasks”. ArXiv preprint link: https://arxiv.org/abs/2002.11844.
 
 ## Initial Setup
 

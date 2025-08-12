@@ -1,5 +1,9 @@
 # The Hypergeometric Test Performs Comparably to TF-IDF on Standard Text Analysis Tasks Computer Code
-This repository contains computer code for reproducing the results described in the manuscript “The hypergeometric test performs comparably to TF-IDF on standard text analysis tasks”. ArXiv preprint link: https://arxiv.org/abs/2002.11844.
+This repository contains computer code for reproducing the results described in the manuscript “The hypergeometric test performs comparably to TF-IDF on standard text analysis tasks”. 
+
+Journal article link: https://link.springer.com/article/10.1007/s11042-023-16615-z
+
+ArXiv preprint link: https://arxiv.org/abs/2002.11844
 
 ## Initial Setup
 
@@ -28,3 +32,24 @@ git clone https://github.com/paul-sheridan/hgt-tfidf.git
 ## Reproducing our Twenty Newsgroups Dataset Case Study Results
 
 * To reproduce the preformance evaluation results of Table 3, run the `hgt-tfidf/twenty-newsgroups/dataset/twenty-newsgroups-analysis.ipynb` Jypyter Notebook file.
+
+## Questions and Feedback
+If you have a technical question about the manuscript, feel free to post it as an [issue](https://github.com/paul-sheridan/hgt-tfidf/issues).
+
+For more open-ended inquiries, we encourage starting a [discussion](https://github.com/paul-sheridan/hgt-tfidf/discussions).
+
+## Citation
+If you find anything useful please cite our work using:
+```
+@article{Sheridan2024,
+ author = {Sheridan, Paul and Onsj{\"o}, Mikael},
+ title = {The hypergeometric test performs comparably to {TF}-{IDF} on standard text analysis tasks},
+ journal = {Multimedia Tools and Applications},
+ year = {2024},
+ day = {01},
+ volume = {83},
+ number = {10},
+ pages = {28875-28890},
+ issn = {1573-7721}
+}
+```
